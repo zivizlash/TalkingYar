@@ -47,17 +47,17 @@ class TalkingYarBot {
     console.log(`🔑 ID сервера: ${process.env.DISCORD_GUILD_ID}`);
     console.log(`📢 Канал: ${process.env.DISCORD_CHANNEL_ID}`);
 
-    this.autoPlay();
+    // this.autoPlay();
   }
 
   async onMessageCreate(message) {
     if (message.author.bot) return;
 
-    console.log(message.channel.toJSON());
+    // console.log(message.channel.toJSON());
 
     // check for voice_channel
     if (message.channel.type !== 2) {
-
+      // тут будет проверка и дальнейшая отправка сообщения на озвучку.
     }
 
     if (message.content.toLowerCase() === "play the funky tune.") {
