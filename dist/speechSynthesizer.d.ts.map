@@ -1,0 +1,1 @@
+{"version":3,"file":"speechSynthesizer.d.ts","sourceRoot":"","sources":["../speechSynthesizer.ts"],"names":[],"mappings":"AA0IA,cAAM,iBAAiB;IACrB;;;;;OAKG;IACG,mBAAmB,CAAC,IAAI,EAAE,MAAM,GAAG,OAAO,CAAC,GAAG,GAAG,IAAI,CAAC;IAmB5D;;OAEG;YACW,kBAAkB;IAiBhC;;OAEG;YACW,oBAAoB;CAuCnC;AAED,eAAe,iBAAiB,CAAC"}
