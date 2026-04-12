@@ -6,7 +6,7 @@ import {
   AudioPlayerStatus,
   VoiceConnection,
 } from "@discordjs/voice";
-import SpeechSynthesizer from "./speechSynthesizer";
+import SpeechSynthesizer from "./speechSynthesizer.js";
 
 /**
  * Интерфейс для элемента очереди воспроизведения

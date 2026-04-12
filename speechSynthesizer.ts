@@ -37,38 +37,17 @@ const voices = [
   loadVoiceEntry(
     "egor_sample.wav", 
     "егор",
-    "Так ты, богохульник. Зачем пиво проливаешь.Т+ак т+ы богах+ульник Т+ы зач+ем п+иво пролив+аешь?."
+    "Т+ак т+ы богах+ульник Т+ы зач+ем п+иво пролив+аешь?."
   )
 ];
 
-const getRef = () => {
-  if (soundRef === null) {
-    const buffer = fs.readFileSync('example.wav');
-    const blob = new Blob([buffer]);
-    soundRef = blob;
-  }
-
-  return soundRef;
-};
-
-/**
- * Нормализует текст: удаляет лишние пробелы, переводит в нижний регистр, добавляет точку в конце
- */
 const normalizeText = (text: string): string => {
   return text
     .replace(/\s+/g, " ") // Заменяем все подряд идущие пробелы на один
     .trim() // Убираем leading/trailing пробелы
-    .toLowerCase() // Переводим в нижний регистр
-    .replace(/[.,?!;:]+$/, ".") // Заменим любые знаки препинания в конце на точку
-    + "."; // Добавляем точку в конце
 };
 
-
-
-/**
- * Распознаёт шаблон "{имя голоса}: текст" и извлекает имя голоса
- * Возвращает текст до ":" в voiceName (с trim) и всё после ":" в normalizedText
- */
+// Распознаёт шаблон "{имя голоса}: текст" и извлекает имя голоса
 const extractVoiceName = (text: string): { voiceName?: string; normalizedText: string } => {
   const colonIndex = text.indexOf(":");
 

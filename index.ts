@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events } from "discord.js";
+import { Client, Gateway  IntentBits, Events } from "discord.js";
 import { SessionManager } from "./session.js";
 
 class TalkingYarBot {
