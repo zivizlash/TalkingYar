@@ -1,47 +1,71 @@
 # Implementation Plan
 
 [Overview]
-Реализовать Discord бота с голосовым чатом, который реагирует на любой текст в голосовых каналах, генерирует речь через Gradio API и воспроизводит сообщения последовательно из очереди для каждой гильдии.
+Замена синтеза речи через Gradio Client на REST API для управления голосовыми каналами.
+
+Данная реализация переводит модуль SpeechSynthesizer от использования Gradio Client к прямым HTTP-запросам к REST API на localhost:8000. Это позволяет более гибко управлять состоянием и использовать OpenAPI спецификацию для документирования доступных эндпоинтов. Основные изменения включают замену клиента Gradio на axios, реализацию предварительной загрузки голосов через PUT /voice/{voice_name} и изменение формата результата синтеза на GET /generate_voice/{voice_name}.
 
 [Types]
-Single sentence describing the type system changes.
+- **VoiceMetadata** - интерфейс для метаданных голоса с полями: filename (string), name (string), referenceText (string)
+- **AudioResult** - интерфейс для результата синтеза с полями: path (string) или data (Blob)
+- **HttpClient** - тип для axios клиент HTTP запросов
 
 [Files]
-- Создать новый файл `voiceQueue.js` для управления очередью сообщений
-- Создать новый файл `speechSynthesizer.js` для работы с Gradio API
-- Создать новый файл `voiceManager.js` для управления голосовыми соединениями
-- Модифицировать `index.js` для интеграции новых модулей
-- Создать `config.json` для хранения настроек голосов и очередей
+1. speechSynthesizer.ts - полное переписывание файла со следующими изменениями:
+   - Удаление импорта "@gradio/client"
+   - Добавление импорта "axios" с типом AnyAxiosRequestConfig
+   - Замена static массива voices на Map для хранения голосов и их метаданных
+   - Удаление функции loadVoiceEntry (заменяется на конструктор VoiceMetadata)
+   - Изменение объекта voices на Map<string, VoiceMetadata>
+   - Добавление класса HttpClient для работы с API localhost:8000
+   - Добавление метода _initializeVoices() в HttpClient для инициализации голосов через PUT /voice/{voice_name}
+   - Изменение SpeechSynthesizer класса:
+     * Конструктор принимает baseUrl (default: "http://localhost:8000")
+     * В конструкторе вызывается HttpClient.initializeVoices() для предварительной загрузки всех голосов
+     * Замена _generateWithRetries на новый метод generateVoiceWithRetry()
+     * Метод использует GET /generate_voice/{voice_name} вместо Gradio predict
+     * Изменение парсинга результата: ожидание Blob или Base64 данные в response.data
 
 [Functions]
-- Создать функцию `enqueueMessage(guildId, text)` для добавления сообщений в очередь
-- Создать функцию `processQueue(guildId)` для обработки очереди
-- Создать функцию `synthesizeSpeech(text)` для генерации речи через Gradio
-- Создать функцию `connectToVoiceChannel(guildId, channelId)` для подключения к голосовому каналу
-- Создать функцию `playAudio(guildId, audioBuffer)` для воспроизведения аудио
+1. New function - HttpClient.initializeVoices(): асинхронная функция инициализации всех голосов через PUT /voice/{voice_name}
+2. New function - HttpClient.generateVoice(text, voiceName): генерация речи через GET /generate_voice/{voice_name} с передачей текста в параметре query
 
 [Classes]
-- Создать класс `VoiceQueue` для управления очередями сообщений
-- Создать класс `SpeechSynthesizer` для работы с Gradio API
-- Создать класс `VoiceManager` для управления голосовыми соединениями
+1. New class HttpClient:
+   - Файл: speechSynthesizer.ts (встроенный inner class)
+   - Ключевые методы: initializeVoices(), getVoiceMetadata(), generateVoice()
+   - Использует axios для HTTP запросов к localhost:8000
+
+2. Modified class SpeechSynthesizer:
+   - Файл: speechSynthesizer.ts
+   - Изменения:
+     * Конструктор принимает baseUrl и список голосов
+     * В конструкторе вызывается HttpClient.initializeVoices()
+     * Метод generateWithRetories(text): теперь использует new HttpClient(baseUrl) для создания клиента и вызывает generateVoiceWithRetry()
+     * Удалён метод _generateWithRetries - заменён на generateVoiceWithRetry()
+     * Метод generateVoiceWithRetry(text, retries=3): использует REST API GET /generate_voice/{voice_name}
 
 [Dependencies]
-- Добавить зависимость `@discordjs/voice` (уже установлена)
-- Добавить зависимость `@gradio/client` (уже установлена)
-- Добавить зависимость `level` для хранения очередей (уже установлена)
+Добавление axios в package.json: "axios": "^1.7.4" (или последняя LTS версия)
+Удаление @gradio/client из зависимостей после замены на REST API
+Изменение tsconfig.json если нужно: removal resolveJsonModule может не требоваться (но можно оставить для совместимости)
 
 [Testing]
-- Создать тесты для проверки очереди сообщений
-- Создать тесты для проверки синтеза речи
-- Создать тесты для проверки подключения к голосовым каналам
-- Создать интеграционные тесты для полного потока
+- Создание test scripts в package.json для проверки синтеза через новый API
+- Тестирование инициализации голосов при запуске SpeechSynthesizer
+- Тестирование обработки ошибок при недоступности API localhost:8000
+- Валидация формата Blob response от /generate_voice/{voice_name}
+- Проверка retry логики при неудачных запросах
 
 [Implementation Order]
-1. Создать модуль `voiceQueue.js` с базовой функциональностью очереди
-2. Создать модуль `speechSynthesizer.js` с подключением к Gradio API
-3. Создать модуль `voiceManager.js` для управления голосовыми соединениями
-4. Интегрировать модули в `index.js`
-5. Добавить обработку сообщений в голосовых каналах
-6. Реализовать последовательное воспроизведение из очереди
-7. Добавить обработку ошибок и реконнекты
-8. Создать тесты и проверить функциональность
+1. Установка axios через npm install
+2. Изменение tsconfig.json для поддержки axios (если требуется)
+3. Переписывание speechSynthesizer.ts:
+   а) Удаление импорта Gradio Client, добавление axios
+   б) Удаление функции loadVoiceEntry
+   в) Замена массива voices на Map<string, VoiceMetadata>
+   г) Добавление HttpClient класса с методами для REST API
+   д) Изменение конструктора SpeechSynthesizer для инициализации через HttpClient
+   е) Замена _generateWithRetries на generateVoiceWithRetry() использующую REST API
+4. Обновление package.json удалением @gradio/client добавлением axios
+5. Тестирование изменений в index.ts или отдельном тестовом файле

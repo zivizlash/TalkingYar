@@ -1,50 +1,31 @@
-import { Client } from "@gradio/client";
-import fs from "fs";
 import { Blob } from "buffer";
+import * as fs from "fs";
+import axios from "axios";
+import { createAudioResource } from "@discordjs/voice";
+import { Readable } from "node:stream";
 
-let soundRef: Blob | null = null;
-
-type VoiceEntry = {
+type VoiceMetadata = {
   filename: string;
   name: string;
   referenceText: string;
-  blob: Blob;
-}
-
-const loadVoiceEntry = (filename: string, name: string, referenceText: string): VoiceEntry => {
-  const bytes = fs.readFileSync(`samples/${filename}`)
-  const blob = new Blob([bytes]);
-
-  return {
-    filename,
-    name,
-    referenceText,
-    blob
-  }
 };
 
+const loadVoiceEntry = (filename: string, name: string, referenceText: string): VoiceMetadata => ({
+  filename,
+  name,
+  referenceText,
+});
+
 const voices = [
-  loadVoiceEntry(
-    "diana_sample.wav", 
-    "диана",
-    "Ярослав, посмотри игру, пожалуйста. Пожалуйста. Мне кажется, там прикольный кооператив, и как будто бы мы сможем даже втроём поиграть, если что вдруг, если кто-то больше не захочет. Вот."
-  ),
-  loadVoiceEntry(
-    "danya_sample.wav", 
-    "даня",
-    "Мне вообще до пизды, чел. Мне вообще похуй. Понимаешь, чел? Поебать. Похуй. В курсе, нет? Это же не я не доберусь, а вы. Ха Ха. Бля у сука"
-  ),
-  loadVoiceEntry(
-    "egor_sample.wav", 
-    "егор",
-    "Т+ак т+ы богах+ульник Т+ы зач+ем п+иво пролив+аешь?."
-  )
+  loadVoiceEntry("default_sample.wav", "дефолт", "Малышка, ты выполнила задание на 5 с плюсом!"),
+  loadVoiceEntry("diana_sample.wav", "диана", "Ярослав, посмотри игру, пожалуйста. Пожалуйста. Мне кажется, там прикольный кооператив, и как будто бы мы сможем даже втроём поиграть, если что вдруг, если кто-то больше не захочет. Вот."),
+  loadVoiceEntry("egor_sample.wav", "егор", "Так ты богах+ульник Ты зачем пиво проливаешь?.")
 ];
 
 const normalizeText = (text: string): string => {
   return text
-    .replace(/\s+/g, " ") // Заменяем все подряд идущие пробелы на один
-    .trim() // Убираем leading/trailing пробелы
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
 // Распознаёт шаблон "{имя голоса}: текст" и извлекает имя голоса
@@ -61,7 +42,6 @@ const extractVoiceName = (text: string): { voiceName?: string; normalizedText: s
   const prefix = text.substring(0, colonIndex).trim();
   const afterColon = text.substring(colonIndex + 1);
 
-  // Если перед двоеточием есть текст (не пустая строка) - это имя голоса
   if (prefix.length > 0) {
     return {
       voiceName: prefix.toLowerCase(),
@@ -75,102 +55,122 @@ const extractVoiceName = (text: string): { voiceName?: string; normalizedText: s
   };
 };
 
-/**
- * Ищет голос по имени в списке voices и возвращает соответствующую пару referenceText/blob
- */
-const findVoiceByname = (targetVoice: string): VoiceEntry | null => {
-  const found = voices.find((v) => v.name.toLowerCase() === targetVoice);
-  return found || null;
-};
+class ApiHttpClient {
+  readonly baseUrl: string;
 
-class SpeechSynthesizer {
-  /**
-   * Генерирует речь с ретрайми (3 попытки) при ошибках синтеза.
-   * Если все попытки неудачны, возвращает null.
-   * @param text - текст для синтеза
-   * @returns результат синтеза или null если все попытки были неудачны
-   */
-  async generateWithRetries(text: string): Promise<any | null> {
-    const parsed = extractVoiceName(text);
-
-    console.log(parsed);
-
-    // Если найден голос по имени, используем его referenceText и blob
-    if (parsed.voiceName) {
-      const voice = findVoiceByname(parsed.voiceName);
-      if (voice) {
-        return await this._generateWithRetries(parsed.normalizedText, voice.referenceText, voice.blob);
-      }
-    }
-
-    const referenceAudio = voices[0].blob;
-    const referenceText = voices[0].referenceText;
-
-    return await this._generateWithRetries(parsed.normalizedText, referenceText, referenceAudio);
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
   }
 
-  /**
-   * Внутренний метод для синтеза с предоставленным аудио и текстом референса
-   */
-  private async _generateWithAudio(genText: string, refText: string, refAudio: Blob): Promise<any> {
-    const client = await Client.connect("http://127.0.0.1:7860");
-
-    const result = await client.predict<any>("/synthesize", {
-      ref_audio: refAudio,
-      ref_text: refText,
-      gen_text: genText,
-      remove_silence: false,
-      seed: -1,
-      cross_fade_duration: 0.15,
-      nfe_step: 48,
-      speed: 1.0,
-    });
-
-    return result.data;
-  }
-
-  /**
-   * Внутренний метод для синтеза с ретрайми и предоставленным аудио и текстом референса
-   */
-  private async _generateWithRetries(genText: string, refText: string, refAudio: Blob): Promise<any | null> {
-    const maxRetries = 3;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  async initializeVoices(): Promise<void> {
+    for (const voice of voices) {
       try {
-        const client = await Client.connect("http://127.0.0.1:7860");
+        const audioPath = `samples/${voice.filename}`;
+        
+        // Загружаем аудио файл и создаем formData для PUT /voice/{voice_name}
+        let refAudio: Blob | null = null;
+        if (fs.existsSync(audioPath)) {
+          refAudio = await fs.openAsBlob(audioPath);
+        }
 
-        const result = await client.predict<any>("/synthesize", {
-          ref_audio: refAudio,
-          ref_text: refText,
-          gen_text: genText,
-          remove_silence: false,
-          seed: -1,
-          cross_fade_duration: 0.15,
-          nfe_step: 48,
-          speed: 1.0,
+        const formData = new FormData();
+        formData.append("text", voice.referenceText);
+        formData.append("ref_audio", refAudio!, `reference_${voice.name}.wav`);
+
+        await axios.put(`${this.baseUrl}/voice/${voice.name}`, formData, {
+          headers: { "Content-Type": "multipart/form-data" }
         });
-
-        if (result && result.data) {
-          return result.data;
-        }
-      } catch (error) {
-        console.error(
-          `Попытка ${attempt} из ${maxRetries} синтеза речи для текста "${genText.substring(0, 30)}...":`);
-
-        // Если это ретрий и не последняя попытка, ждем перед следующей
-        if (attempt < maxRetries) {
-          const waitTime = 1000 * attempt; // 1с, 2с, 3с
-          console.log(`Жду ${waitTime}ms перед следующей попыткой...`);
-          await new Promise((resolve) => setTimeout(resolve, waitTime));
-        }
+        console.log(`Голос "${voice.name}" инициализирован`);
+      } catch (error: any) {
+        const voiceName = error?.config?.url?.split('/voice/')[1]?.split('?')[0];
+        console.error(`Ошибка при инициализации голоса "${voiceName || ''}":`, error.message);
       }
     }
+  }
 
-    console.warn(
-      `Все ${maxRetries} попыток синтеза речи для текста "${genText.substring(0, 30)}..." завершены неудачно.`
-    );
-    return null;
+  async getVoiceMetadata(voiceName: string): Promise<VoiceMetadata | null> {
+    try {
+      const response = await axios.get(`${this.baseUrl}/voice/${voiceName}`);
+      if (response.data) {
+        return response.data;
+      }
+      return null;
+    } catch (error) {
+      console.error(`Не удалось получить метаданные для голоса "${voiceName}":`, error);
+      return null;
+    }
+  }
+
+  async generateVoice(text: string, voiceName: string): Promise<Blob | null> {
+    try {
+      var formData = new FormData();
+      formData.append("text", text);
+
+      const response = await axios({
+        method: "POST",
+        url: `${this.baseUrl}/generate_voice/${voiceName}`,
+        responseType: "blob",
+        data: formData,
+        headers: {
+          "Content-Type": "multipart/form-data"
+        }
+      })
+
+      const blob = new Blob([response.data], { type: "audio/wav" });
+
+      return blob;
+    } catch (error) {
+      console.error(`Ошибка генерации речи для голоса "${voiceName}", текст: "${text.substring(0, 30)}...":`, error);
+      return null;
+    }
   }
 }
 
-export default SpeechSynthesizer;
+class SpeechSynthesizer {
+  private voicesMap: Map<string, VoiceMetadata>;
+  
+  constructor(baseUrl: string = "http://localhost:8000") {
+    this.voicesMap = new Map(voices.map(v => [v.name.toLowerCase(), v]));
+    
+    console.log("Инициализация SpeechSynthesizer через REST API...");
+    const client = new ApiHttpClient(baseUrl);
+    
+    client.initializeVoices().then(() => {
+      console.log("Все голоса инициализированы.");
+    }).catch(err => {
+      console.error("Ошибка при инициализации голосов:", err);
+    });
+  }
+
+  async generate(text: string): Promise<any> {
+    const parsed = extractVoiceName(text);
+
+    if (parsed.voiceName) {
+      return await this.generateVoiceInternal(parsed.normalizedText, parsed.voiceName);
+    }
+
+    return await this.generateVoiceInternal(parsed.normalizedText, "дефолт");
+  }
+
+  private async generateVoiceInternal(genText: string, voiceName: string): Promise<any> {
+    const httpClient = new ApiHttpClient("http://localhost:8000");
+
+    console.log("Старт генерации")
+    const blob = await httpClient.generateVoice(genText, voiceName);
+    console.log("Генерация закончена")
+    return await this.createAudioResourceFromBlob(blob!);
+  }
+
+  // Вспомогательная функция для создания AudioResource из Blob
+  private async createAudioResourceFromBlob(blob: Blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const stream = Readable.from(buffer);
+
+    const resource = createAudioResource(stream);
+    return resource;
+  }
+}
+
+export { SpeechSynthesizer };

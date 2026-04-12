@@ -32,10 +32,6 @@ class TalkingYarBot {
         if (message.member?.voice?.channel) {
             await this.processVoiceMessage(message);
         }
-        // Обработка команды play
-        if (message.content.toLowerCase() === "play the funky tune.") {
-            await this.handlePlayCommand(message);
-        }
     }
     async onVoiceStateUpdate(oldState, newState) {
         // Обработка отключения бота от голосового канала
@@ -63,27 +59,6 @@ class TalkingYarBot {
         catch (error) {
             console.error("Ошибка обработки голосового сообщения:", error);
             await message.reply("❌ Произошла ошибка при обработке вашего сообщения");
-        }
-    }
-    async handlePlayCommand(message) {
-        if (!message.member?.voice?.channel) {
-            return message.reply("❌ Вы должны находиться в голосовом канале!");
-        }
-        const guildId = message.guild.id;
-        const session = this.sessionManager.getOrCreateSession(guildId);
-        if (session.isConnected()) {
-            return message.reply("⚠️ Я уже воспроизвожу аудио!");
-        }
-        try {
-            // Подключаем к голосовому каналу пользователя
-            await session.connect(message.member.voice.channel.id, message.guild);
-            // Добавляем тестовый файл в очередь
-            await session.enqueue("Воспроизведение началось!");
-            await message.reply("🎵 Воспроизведение началось...");
-        }
-        catch (error) {
-            console.error("Ошибка при подключении к каналу:", error);
-            await message.reply("❌ Произошла ошибка при подключении к голосовому каналу");
         }
     }
     async start() {

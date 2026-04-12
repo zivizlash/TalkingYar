@@ -1,13 +1,13 @@
 import { AudioPlayer, VoiceConnection } from "@discordjs/voice";
-import SpeechSynthesizer from "./speechSynthesizer";
+import { SpeechSynthesizer } from "./speechSynthesizer.js";
 /**
  * Интерфейс для элемента очереди воспроизведения
  */
 interface QueueItem {
     /** Текст для синтеза речи */
     text: string;
-    /** Путь к аудио файлу (результат синтеза) */
-    audioPath: string | null;
+    /** AudioResource или null если ещё не синтезирован */
+    audioResource: any | null;
     /** Статус элемента в очереди */
     status: "pending" | "playing" | "completed" | "failed";
 }
@@ -23,7 +23,7 @@ declare class Session {
     /** Аудио плеер для воспроизведения */
     audioPlayer: AudioPlayer;
     /** Синтезатор речи */
-    speechSynthesizer: SpeechSynthesizer;
+    speechSynthesizer?: SpeechSynthesizer | null;
     /** Очередь элементов для воспроизведения */
     queue: QueueItem[];
     /** Флаг, указывающий идет ли сейчас воспроизведение */
@@ -52,7 +52,7 @@ declare class Session {
      * Воспроизводит аудио файл по указанному пути
      * @param filePath - путь к аудио файлу
      */
-    private playAudioFile;
+    private playAudioResource;
     /**
      * Подключает бота к голосовому каналу
      * @param channelId - ID голосового канала
@@ -123,5 +123,5 @@ declare class SessionManager {
     getSessionCount(): number;
 }
 export default Session;
-export { SessionManager, type QueueItem };
+export { SessionManager, type QueueItem, SpeechSynthesizer };
 //# sourceMappingURL=session.d.ts.map

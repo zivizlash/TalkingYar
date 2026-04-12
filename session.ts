@@ -6,7 +6,7 @@ import {
   AudioPlayerStatus,
   VoiceConnection,
 } from "@discordjs/voice";
-import SpeechSynthesizer from "./speechSynthesizer.js";
+import { SpeechSynthesizer } from "./speechSynthesizer.js";
 
 /**
  * Интерфейс для элемента очереди воспроизведения
@@ -14,8 +14,8 @@ import SpeechSynthesizer from "./speechSynthesizer.js";
 interface QueueItem {
   /** Текст для синтеза речи */
   text: string;
-  /** Путь к аудио файлу (результат синтеза) */
-  audioPath: string | null;
+  /** AudioResource или null если ещё не синтезирован */
+  audioResource: any | null;
   /** Статус элемента в очереди */
   status: "pending" | "playing" | "completed" | "failed";
 }
@@ -35,7 +35,7 @@ class Session {
   audioPlayer: AudioPlayer;
 
   /** Синтезатор речи */
-  speechSynthesizer: SpeechSynthesizer;
+  speechSynthesizer?: SpeechSynthesizer | null;
 
   /** Очередь элементов для воспроизведения */
   queue: QueueItem[];
@@ -59,6 +59,11 @@ class Session {
     this.queue = [];
     this.isPlaying = false;
     this.channelId = null;
+    if (speechSynthesizer) {
+      this.speechSynthesizer = speechSynthesizer;
+    } else {
+      this.speechSynthesizer = null;
+    }
 
     // Подписываемся на события аудио плеера
     this.setupAudioPlayerEvents();
@@ -113,7 +118,7 @@ class Session {
         const item = this.queue[0];
         if (item.status === "completed" || item.status === "failed") {
           this.queue.shift();
-        } else if (item.audioPath !== null) {
+        } else if (item.audioResource !== null) {
           // Успешно синтезированный, но ещё не воспроизведённый элемент
           break;
         } else {
@@ -130,26 +135,26 @@ class Session {
       // Получаем следующий элемент
       const nextItem = this.queue[0];
 
-      // Если элемент еще не синтезирован или ещё не воспроизведён, пробуем синтезировать/воспроизвести
-      if (nextItem.audioPath === null) {
+      // Если элемент еще не синтезирован, пробуем синтезировать/воспроизвести
+      if (nextItem.audioResource === null && this.speechSynthesizer) {
         try {
           // Синтезируем речь с ретрайми (3 попытки)
-          const result = await this.speechSynthesizer.generateWithRetries(nextItem.text);
+          const audioResource = await this.speechSynthesizer.generate(nextItem.text);
 
-          if (result && result[0] && result[0].path) {
-            // Сохраняем путь к файлу для воспроизведения
-            nextItem.audioPath = result[0].path;
+          if (audioResource) {
+            // Сохраняем AudioResource для воспроизведения
+            nextItem.audioResource = audioResource;
             
             // Помечаем как воспроизводящийся и запускаем
             nextItem.status = "playing";
             this.isPlaying = true;
 
             // Воспроизводим
-            await this.playAudioFile(result[0].path);
+            await this.playAudioResource(audioResource);
           } else {
             // Синтез неудачен - помечаем как неудачный и удаляем из начала очереди
             nextItem.status = "failed";
-            console.error(`Не удалось получить аудио для текста: ${nextItem.text.substring(0, 30)}...`);
+            console.error(`Не удалось синтезировать речь для текста: ${nextItem.text.substring(0, 30)}...`);
             this.processNextInQueue(); // Перезапускаем цикл очистки очереди
           }
         } catch (error: any) {
@@ -157,14 +162,14 @@ class Session {
           nextItem.status = "failed";
           this.processNextInQueue(); // Перезапускаем цикл очистки очереди
         }
-      } else if (nextItem.audioPath !== null && nextItem.status === "playing") {
+      } else if (nextItem.audioResource !== null && nextItem.status === "playing") {
         // Элемент уже синтезирован и помечен как воспроизводящийся, ждём Idle событие
-      } else if (nextItem.audioPath !== null && nextItem.status === "pending") {
+      } else if (nextItem.audioResource !== null && nextItem.status === "pending") {
         // Успешно синтезированный элемент в pending статусе - начинаем воспроизведение
         try {
           nextItem.status = "playing";
           this.isPlaying = true;
-          await this.playAudioFile(nextItem.audioPath);
+          await this.playAudioResource(nextItem.audioResource);
         } catch (error: any) {
           console.error(`Ошибка воспроизведения:`, error.message);
           nextItem.status = "failed";
@@ -177,16 +182,14 @@ class Session {
    * Воспроизводит аудио файл по указанному пути
    * @param filePath - путь к аудио файлу
    */
-  private async playAudioFile(filePath: string) {
+  private async playAudioResource(audioResource: any) {
     if (!this.voiceConnection) {
       console.error("Нет подключения к голосовому каналу");
       this.processNextInQueue();
       return;
     }
 
-    const resource = createAudioResource(filePath);
-
-    this.audioPlayer.play(resource);
+    this.audioPlayer.play(audioResource);
   }
 
   /**
@@ -230,9 +233,14 @@ class Session {
    * @param text - текст для синтеза и воспроизведения
    */
   async enqueue(text: string): Promise<void> {
+    if (!this.speechSynthesizer) {
+      console.warn(`Session для guild ${this.guildId}: синтезатор речи не инициализирован`);
+      return;
+    }
+    
     const queueItem: QueueItem = {
       text,
-      audioPath: null,
+      audioResource: null,
       status: "pending",
     };
 
@@ -286,10 +294,11 @@ class SessionManager {
   /** Синтезатор речи (общий для всех сессий) */
   speechSynthesizer: SpeechSynthesizer;
 
-  constructor() {
-    this.sessions = new Map();
-    this.speechSynthesizer = new SpeechSynthesizer();
-  }
+    constructor() {
+      this.sessions = new Map();
+      this.speechSynthesizer = new SpeechSynthesizer();
+      console.log("SessionManager инициализирован с REST API");
+    }
 
   /**
    * Получает или создает сессию для указанного guild
@@ -348,4 +357,4 @@ class SessionManager {
 }
 
 export default Session;
-export { SessionManager, type QueueItem };
+export { SessionManager, type QueueItem, SpeechSynthesizer };
