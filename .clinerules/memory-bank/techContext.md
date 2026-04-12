@@ -8,7 +8,7 @@
 - **Аудио кодек**: ffmpeg-static
 - **Линтер**: ESLint
 - **Форматтер**: Prettier
-- **API для синтеза речи**: REST API (http://localhost:8000) с fetch API для GET запросов, axios для PUT
+- **API для синтеза речи**: REST API (http://localhost:8000) с axios для POST /generate_voice и PUT /voice/{name}
 - **База данных**: Level (level) для персистентной очереди
 
 ## Настройка окружения
@@ -51,13 +51,14 @@
   - `ref_audio` (file) - аудио файл референс (blob)
 - **Headers**: `{ "Content-Type": "multipart/form-data" }`
 
-### Генерация речи
-- **Метод**: POST (через fetch)
+### Генерация речи через axios
+- **Метод**: POST (через axios)
 - **Путь**: `/generate_voice/{voice_name}`
-- **Params**: 
-  - `text` (string) - текст для синтеза
-- **Response Type**: blob
-- **Описание**: Генерация аудио файла с синтезированной речью
+- **Body**: `{ text: string }` - JSON объект с полем text
+- **Headers**: `{ "Content-Type": "application/json" }`
+- **Response Type**: blob → сохраняется в temp/ как wav файл
+- **Имя файла**: `voice_{name}_{timestamp}.wav`
+- **Описание**: Генерация аудио файла с синтезированной речью, который возвращается как путь к файлу
 
 ### Получение метаданных голоса
 - **Метод**: GET (через axios)
@@ -81,27 +82,28 @@ type VoiceMetadata = {
 
 ## Паттерны работы с REST API
 1. При создании SpeechSynthesizer происходит автоматическая инициализация всех голосов через PUT /voice/{name} (axios)
-2. Генерация речи использует POST /generate_voice/{name} с отправкой формы FormData через body (поле text) (fetch)
-3. Ответ генерации приходит как Blob
+2. Генерация речи использует POST /generate_voice/{name} через axios с JSON body `{ text }`
+3. Ответ генерации сохраняется во временный wav файл в temp/ (`voice_{name}_{timestamp}.wav`)
+4. Метод возвращает путь к файлу вместо Blob
 
 ## Работа с Blob данными и AudioResource
-- `speechSynthesizer.generateWithRetries()` возвращает **AudioResource** напрямую (Blob конвертируется в AudioResource внутри)
+- `generateVoice()` возвращает **path to string** (путь к wav файлу), а не Blob напрямую
+- `createAudioResourceFromPath()` создаёт **AudioResource** из wav файла (через Readable stream)
 - `session.playAudioResource()` принимает **AudioResource** для воспроизведения
-- Конвертация Blob -> Buffer -> Readable Stream -> AudioResource происходит внутри SpeechSynthesizer.createAudioResourceFromBlob()
 
-### Функция конвертации Blob в AudioResource
+### Функция создания AudioResource из wav файла
 ```typescript
-function createAudioResourceFromBlob(blob: Blob): Promise<any> {
-  const arrayBuffer = blob.arrayBuffer();
-  return arrayBuffer.then(buffer => {
-    const bufferObj = Buffer.from(buffer);
-    const { Readable } = require("node:stream");
-    const stream = Readable.from(bufferObj);
-    const { createAudioResource } = require("@discordjs/voice");
-    return createAudioResource(stream);
-  });
+function createAudioResourceFromPath(filePath: string): any {
+  const buffer = fs.readFileSync(filePath);
+  const stream = Readable.from(buffer);
+  const { createAudioResource } = require("@discordjs/voice");
+  return createAudioResource(stream);
 }
 ```
+
+### Структура ApiHttpClient
+- `baseUrl`: URL REST API (default: "http://localhost:8000")
+- `tempDir`: Путь к временной директории для wav файлов (default: process.cwd() + "/temp")
 
 ### Структура QueueItem
 - `text`: строка для синтеза речи

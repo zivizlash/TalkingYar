@@ -27,8 +27,6 @@ class TalkingYarBot {
 
   onReady() {
     console.log(`✅ Бот авторизован как ${this.client.user!.tag}`);
-    console.log(`🔑 ID сервера: ${process.env.DISCORD_GUILD_ID}`);
-    console.log(`📢 Канал: ${process.env.DISCORD_CHANNEL_ID}`);
   }
 
   async onMessageCreate(message) {

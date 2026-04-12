@@ -17,6 +17,12 @@
 ✅ При завершении трека вызывается `onTrackFinished()` который помечает элемент как завершенный и продолжает очередь
 ✅ **Миграция на REST API: speechSynthesizer.ts возвращает AudioResource напрямую вместо Blob**
 ✅ **Введена конвертация Blob → Buffer → Readable Stream → AudioResource внутри SpeechSynthesizer.createAudioResourceFromBlob()**
+✅ **generateVoice переписан с fetch на axios для POST /generate_voice/**
+✅ **generateVoice возвращает путь к временному wav файлу, а Blob напрямую:**
+  - Ответ axios (Blob) сохраняется во временный файл в директорию `temp/`
+  - Имя файла: `voice_{name}_{timestamp}.wav`
+  - Метод возвращает строку с путём вместо Blob
+  - Создание AudioResource происходит из файла через `createAudioResourceFromPath()`
 
 ## Последние изменения
 - ✅ Обработчик `AudioPlayerStatus.Idle` с объединенным логированием
@@ -34,8 +40,8 @@
   - Удалена зависимость от `@gradio/client`
   - Добавлена зависимость `axios` для инициализации голосов
   - Заменено использование `/synthesize` на REST API эндпоинты:
-    * PUT `/voice/{voice_name}` - инициализация голоса
-    * POST `/generate_voice/{voice_name}` - генерация речи (fetch API)
+    * PUT `/voice/{voice_name}` - инициализация голоса (axios)
+    * POST `/generate_voice/{voice_name}` - генерация речи (axios)
   - Конструктор SpeechSynthesizer принимает baseUrl (default: "http://localhost:8000")
 - ✅ **Миграция на AudioResource:**
   - `generateWithRetries()` теперь возвращает `AudioResource` вместо Blob
