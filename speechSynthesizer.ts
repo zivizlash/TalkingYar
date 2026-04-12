@@ -1,8 +1,10 @@
 import { Blob } from "buffer";
 import * as fs from "fs";
+import * as path from "path";
 import axios from "axios";
 import { createAudioResource } from "@discordjs/voice";
 import { Readable } from "node:stream";
+import { finished } from 'stream/promises';
 
 type VoiceMetadata = {
   filename: string;
@@ -57,9 +59,11 @@ const extractVoiceName = (text: string): { voiceName?: string; normalizedText: s
 
 class ApiHttpClient {
   readonly baseUrl: string;
+  readonly tempDir: string;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, tempDir?: string) {
     this.baseUrl = baseUrl;
+    this.tempDir = tempDir || "/tmp" || process.cwd() + "/temp";
   }
 
   async initializeVoices(): Promise<void> {
@@ -88,48 +92,65 @@ class ApiHttpClient {
     }
   }
 
-  async getVoiceMetadata(voiceName: string): Promise<VoiceMetadata | null> {
-    try {
-      const response = await axios.get(`${this.baseUrl}/voice/${voiceName}`);
-      if (response.data) {
-        return response.data;
-      }
-      return null;
-    } catch (error) {
-      console.error(`Не удалось получить метаданные для голоса "${voiceName}":`, error);
-      return null;
-    }
+  async downloadFile(formData, outputPath, voiceName) {
+    const writer = fs.createWriteStream(outputPath);
+
+    const response = await axios({
+      method: "POST",
+      url: `${this.baseUrl}/generate_voice/${voiceName}`,
+      data: formData,
+      headers: {
+        "Content-Type": "multipart/form-data"
+      },
+      responseType: 'stream'
+    });
+
+    // Pipe the read stream into the write stream
+    response.data.pipe(writer);
+
+    // Wait for the stream to finish successfully
+    return finished(writer);
   }
 
-  async generateVoice(text: string, voiceName: string): Promise<Blob | null> {
+  async generateVoice(text: string, voiceName: string): Promise<string | null> {
     try {
       var formData = new FormData();
       formData.append("text", text);
 
-      const response = await axios({
-        method: "POST",
-        url: `${this.baseUrl}/generate_voice/${voiceName}`,
-        responseType: "blob",
-        data: formData,
-        headers: {
-          "Content-Type": "multipart/form-data"
-        }
-      })
+      // const response = await axios({
+      //   method: "POST",
+      //   url: `${this.baseUrl}/generate_voice/${voiceName}`,
+      //   data: formData,
+      //   headers: {
+      //     "Content-Type": "multipart/form-data"
+      //   },
+      //   responseType: "blob"
+      // });
 
-      const blob = new Blob([response.data], { type: "audio/wav" });
+      // Преобразуем response.data в Blob и сохраняем во временный файл
+      // const arrayBuffer = await blob.arrayBuffer();
+      const tempPath = path.join(this.tempDir, `voice_${voiceName}_${Date.now()}.wav`);
+      
+      await this.downloadFile(formData, tempPath, voiceName);
 
-      return blob;
-    } catch (error) {
-      console.error(`Ошибка генерации речи для голоса "${voiceName}", текст: "${text.substring(0, 30)}...":`, error);
+      // const blob = new Blob([response.data], { type: "audio.wav" });
+
+      // fs.writeFileSync(tempPath, await blob.bytes());
+
+      // fs.writeFileSync(tempPath, buffer);
+      return tempPath;
+    } catch (error: any) {
+      console.error(`Ошибка генерации речи для голоса "${voiceName}", текст: "${text.substring(0, 30)}...":`, error.message);
       return null;
     }
   }
+
 }
 
 class SpeechSynthesizer {
   private voicesMap: Map<string, VoiceMetadata>;
   
-  constructor(baseUrl: string = "http://localhost:8000") {
+  constructor(baseUrl: string = "http://localhost:8000", tempDir?: string) {
     this.voicesMap = new Map(voices.map(v => [v.name.toLowerCase(), v]));
     
     console.log("Инициализация SpeechSynthesizer через REST API...");
@@ -146,29 +167,30 @@ class SpeechSynthesizer {
     const parsed = extractVoiceName(text);
 
     if (parsed.voiceName) {
-      return await this.generateVoiceInternal(parsed.normalizedText, parsed.voiceName);
+      return await this.generateFromPath(parsed.normalizedText, parsed.voiceName);
     }
 
-    return await this.generateVoiceInternal(parsed.normalizedText, "дефолт");
+    return await this.generateFromPath(parsed.normalizedText, "дефолт");
   }
 
-  private async generateVoiceInternal(genText: string, voiceName: string): Promise<any> {
-    const httpClient = new ApiHttpClient("http://localhost:8000");
+  private async generateFromPath(genText: string, voiceName: string): Promise<any> {
+    const httpClient = new ApiHttpClient("http://localhost:8000", process.cwd() + "/temp");
 
-    console.log("Старт генерации")
-    const blob = await httpClient.generateVoice(genText, voiceName);
-    console.log("Генерация закончена")
-    return await this.createAudioResourceFromBlob(blob!);
+    console.log(`Старт генерации для голоса "${voiceName}"...`);
+    const filePath = await httpClient.generateVoice(genText, voiceName);
+    
+    if (!filePath) {
+      console.error("Не удалось получить путь к аудио файлу");
+      return null;
+    }
+
+    console.log("Генерация закончена, файл сохранён:", filePath);
+    return this.createAudioResourceFromPath(filePath);
   }
 
-  // Вспомогательная функция для создания AudioResource из Blob
-  private async createAudioResourceFromBlob(blob: Blob) {
-    const arrayBuffer = await blob.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    const stream = Readable.from(buffer);
-
-    const resource = createAudioResource(stream);
+  // Создание AudioResource напрямую из wav файла
+  private createAudioResourceFromPath(filePath: string) {
+    const resource = createAudioResource(filePath);
     return resource;
   }
 }
