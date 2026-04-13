@@ -20,7 +20,6 @@ const loadVoiceEntry = (filename: string, name: string, referenceText: string): 
 
 const voices = [
   loadVoiceEntry("default_sample.wav", "дефолт", "Малышка, ты выполнила задание на 5 с плюсом!"),
-  loadVoiceEntry("diana_sample.wav", "диана", "Ярослав, посмотри игру, пожалуйста. Пожалуйста. Мне кажется, там прикольный кооператив, и как будто бы мы сможем даже втроём поиграть, если что вдруг, если кто-то больше не захочет. Вот."),
   loadVoiceEntry("egor_sample.wav", "егор", "Так ты богах+ульник Ты зачем пиво проливаешь?.")
 ];
 
