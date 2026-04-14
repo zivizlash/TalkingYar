@@ -29,7 +29,7 @@ npm install
 Создайте файл `.env` в корне проекта с необходимыми переменными:
 
 ```env
-DISCORD_TOKEN=ваш_токен_bота
+DISCORD_TOKEN=ваш_токен_бота
 ```
 
 - `DISCORD_TOKEN` — токен бота (получите через [Discord Developer Portal](https://discord.com/developers/applications))
